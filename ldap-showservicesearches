@@ -1,0 +1,19 @@
+#!/bin/bash 
+
+FILTERGROUPS="|infra|ops|platform|product|support"
+SERVICES=$(grep ignoreusers /etc/ldap.conf |cut -f2 -d" " |sed 's/,/|/g')
+USERS=$(/root/bin/ldap-userlist |tail -n+2 |awk -F"=|,| " '{printf $3"|" }')
+SUSPENDEDUSERS=$(/root/bin/ldap-listsuspendedusers |awk -F"=|,| " '{printf $3"|" }')
+DISABLEDUSERS=$(/root/bin/ldap-listdisabledusers |awk -F"=|,| " '{printf $3"|" }')
+OTHERFILTERS="|uidnumber=4...|cn.monitor|sudoers|sudo|foo|USERNAME|USER|felix" #check these again in nov
+OUTPUT="$(grep 'attrs=ALL' /var/log/dirsrv/slapd-aaa*/access* | grep -o '(uid=.*[[:alnum:]])' | egrep -vi "$USERS$SUSPENDEDUSERS$DISABLEDUSERS$SERVICES$FILTERGROUPS$OTHERFILTERS")"
+
+
+if [ -z "$OUTPUT" ]
+        then
+                echo "OK No Unfiltered Services in the LDAP Logs" 
+                exit 0
+        else
+                echo "CRITICAL: Add this to ldap.conf.erb "$OUTPUT
+                exit 2
+fi
