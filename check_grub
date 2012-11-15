@@ -1,0 +1,123 @@
+#!/bin/bash 
+
+GRUB_REQUIRED=0.97
+TARGET_DISKS="$(ls /dev/sd{a,b} 2>/dev/null)"
+FIXUP=0
+NUM_DISKS=( $TARGET_DISKS )
+
+[ ${#NUM_DISKS[@]} -eq 1 ] && echo "OK: Single Disk Config 'just works'" && exit 0
+
+showhelp() {
+echo 
+echo "This Nagios check examines the MBR of sda"
+echo " and sdb. If Grub looks for the Stage2 bootloader"
+echo "anywhere but on the same drive in the boot"
+echo "partition, then this check will be critical."
+echo "Anaconda installs to sda, looking for a specific"
+echo "sector number on sda.  If Anaconda installs"
+echo "to sdb, it also looks for Stage2 on sda at the"
+echo "specific sector number."
+echo 
+echo "To fix this, run the command with the '--fixup'"
+echo "option. This will rewrite the MBR of any"
+echo "misconfigured drive to look for Stage2 in /grub/stage2"
+echo "of it's own root partition (that's /boot once the system"
+echo "is up and filesystems are mounted."
+echo 
+echo " Note: grub-install will also fix sda, but won't fix sdb."
+echo "       This check looks for that also."
+echo
+exit 0
+}
+
+case "$1" in
+   --fixup   ) FIXUP=1;;
+   -h        ) showhelp;;
+   -help     ) showhelp;;
+   --help    ) showhelp;;
+   -*        ) showhelp;;
+  # *         ) showhelp;;
+esac
+
+check_target_disk() {
+TARGET_DISK=$1
+if [ ! -b $TARGET_DISK ]
+        then
+                echo -n "Critical: $TARGET_DISK does not exist, or is not accessible. "
+                STATUS=$((STATUS+1))
+                return 1
+fi
+}
+
+check_grub_version() {
+TARGET_DISK=$1
+GRUB_OUTPUT=$(hexdump -v -s 1042 -n 94 -e '"%_u"' $TARGET_DISK 2>/dev/null)
+GRUB_ONDISK=$(rpm -q --queryformat '%{VERSION}' grub)
+INT_GRUB_REQUIRED=${GRUB_REQUIRED/./}
+INT_GRUB_ONDISK=${GRUB_ONDISK/./}
+if [ $INT_GRUB_REQUIRED -ne $INT_GRUB_ONDISK ]
+        then
+                echo -n "Critical: Grub version on $TARGET_DISK isn't compatible. "
+                STATUS=$((STATUS+1))
+                return 1
+fi
+}
+
+backup_mbr() {
+FILENAME="`echo $1|sed s@"/dev/"@@`_mbr_backup_`date +%s`"
+dd if=$1 of=/tmp/$FILENAME bs=512 count=1 &>/dev/null && echo $1 MBR backed up to /tmp/$FILENAME
+}
+
+fixup_mbr() {
+sda_ROOT_PART=$(grep -o hd.,. /boot/grub/grub.conf |head -n1)
+sdb_ROOT_PART=$(grep -o hd.,. /boot/grub/grub.conf |head -n1|sed s'/hd0/hd1/')
+
+fixup_/dev/sda() {
+echo -e "root ($sda_ROOT_PART)\n setup (hd0)" | grub --batch --device-map=/boot/grub/device.map --config-file=/boot/grub/grub.conf --no-floppy 
+}
+
+fixup_/dev/sdb() {
+echo -e "root ($sdb_ROOT_PART)\n setup (hd1)" | grub --batch --device-map=/boot/grub/device.map --config-file=/boot/grub/grub.conf --no-floppy 
+}
+
+fixup_$1 &>/dev/null && echo Success fixing $1
+}
+
+
+check_stage2_location() {
+TARGET_DISK=$1
+OTHER_DISK="$( echo $TARGET_DISKS | sed s@"$TARGET_DISK"@@ | sed s/" "//g)"
+GRUB_STAGE2_LOCATION=$(hexdump -v -s 64 -n 1 -e '1/1 "%u"' "$TARGET_DISK")
+case "$GRUB_STAGE2_LOCATION" in
+255)    STATUS=$((STATUS+0))
+        ;;
+128)    echo -n "Critical: Stock Grub on $TARGET_DISK. "
+	[ $FIXUP -eq 0 ] && echo -n 'Fix with --fixup & reboot to test '
+	[ $FIXUP -eq 1 ] && echo 'I WILL FIX-er UP' && backup_mbr $TARGET_DISK && fixup_mbr $TARGET_DISK
+	STATUS=$((STATUS+1))
+        ;;
+129)    echo -n "Critical: Grub on $TARGET_DISK is looking at $OTHER_DISK for Stage2. "
+	[ $FIXUP -eq 0 ] && echo -n 'Fix with --fixup & reboot to test '
+	[ $FIXUP -eq 1 ] && echo 'I WILL FIX-er UP' && backup_mbr $TARGET_DISK && fixup_mbr $TARGET_DISK
+        STATUS=$((STATUS+1))
+        ;;
+*)      echo -n "Critical: Grub Stage2 is incorrectly installed to $TARGET_DISK. "      
+        STATUS=$((STATUS+1))
+        ;;
+esac
+}
+
+STATUS=0
+for i in $TARGET_DISKS
+do
+        check_target_disk $i && check_grub_version $i && check_stage2_location $i
+done
+
+if [ $STATUS -gt 0 ]
+        then
+                echo 
+                exit 2
+fi
+echo OK: Grub checks out on $TARGET_DISKS
+exit 0
+
