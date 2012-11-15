@@ -36,7 +36,6 @@ case "$1" in
    -help     ) showhelp;;
    --help    ) showhelp;;
    -*        ) showhelp;;
-  # *         ) showhelp;;
 esac
 
 check_target_disk() {
