@@ -6,7 +6,11 @@ FIXUP=0
 NUM_DISKS=( $TARGET_DISKS )
 
 [ ${#NUM_DISKS[@]} -eq 1 ] && echo "OK: Single Disk Config 'just works'" && exit 0
-[ $(grep '/boot' /proc/mounts | grep -o 'md.') ] || ( echo "OK: /boot isn't RAID'd. Single Disk Config 'just works'" && exit 0 )
+
+if [ ! $(grep '/boot' /proc/mounts | grep -o 'md.') ]; then
+        echo "OK: /boot isn't RAID'd. Single Disk Config 'just works'" 
+        exit 0
+fi
 
 showhelp() {
 echo 
@@ -101,6 +105,11 @@ case "$GRUB_STAGE2_LOCATION" in
 	[ $FIXUP -eq 1 ] && echo 'I WILL FIX-er UP' && backup_mbr $TARGET_DISK && fixup_mbr $TARGET_DISK
         STATUS=$((STATUS+1))
         ;;
+76)    echo -n "Critical: Grub is MISSING from $TARGET_DISK. This needs investigation. "
+	[ $FIXUP -eq 0 ] && echo -n 'Fix with --fixup & reboot to test '
+	[ $FIXUP -eq 1 ] && echo 'I WILL FIX-er UP' && backup_mbr $TARGET_DISK && fixup_mbr $TARGET_DISK
+        STATUS=$((STATUS+1))
+	;;
 *)      echo -n "Critical: Grub Stage2 is incorrectly installed to $TARGET_DISK. "      
         STATUS=$((STATUS+1))
         ;;
