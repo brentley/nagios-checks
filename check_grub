@@ -6,6 +6,7 @@ FIXUP=0
 NUM_DISKS=( $TARGET_DISKS )
 
 [ ${#NUM_DISKS[@]} -eq 1 ] && echo "OK: Single Disk Config 'just works'" && exit 0
+[ $(grep '/boot' /proc/mounts | grep -o 'md.') ] || ( echo "OK: /boot isn't RAID'd. Single Disk Config 'just works'" && exit 0 )
 
 showhelp() {
 echo 
@@ -115,7 +116,7 @@ done
 if [ $STATUS -gt 0 ]
         then
                 echo 
-                exit 2
+                exit 1
 fi
 echo OK: Grub checks out on $TARGET_DISKS
 exit 0
